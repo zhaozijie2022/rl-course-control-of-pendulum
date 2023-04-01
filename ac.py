@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+import pickle
+import os
 
 
 class MLP(nn.Module):
@@ -48,9 +50,9 @@ class Buffer:
         self.next_state = np.zeros([max_size, state_dim])
         self.done = np.zeros([max_size, 1])
         self.ptr = 0
+        self.size = 0
 
     def store(self, state, action, reward, next_state, done):
-
         self.state[self.ptr] = state
         self.action[self.ptr] = action
         self.reward[self.ptr] = reward
@@ -58,9 +60,11 @@ class Buffer:
         self.done[self.ptr] = done
 
         self.ptr = (self.ptr + 1) % self.max_size
+        if self.size < self.max_size:
+            self.size += 1
 
     def sample(self, batch_size):
-        idx = np.random.randint(0, len(self.state), batch_size)
+        idx = np.random.randint(0, self.size, batch_size)
         state = self.state[idx]
         action = self.action[idx]
         reward = self.reward[idx]
@@ -68,25 +72,24 @@ class Buffer:
         done = self.done[idx]
         return state, action, reward, next_state, done
 
-    def __len__(self):
-        return len(self.state)
 
-
-class Agent:
+class ACAgent:
     def __init__(self, env, state_dim, action_dim, gamma=0.98, lr=0.001, batch_size=256, max_size=100000):
         self.env = env
+        self.state_dim = state_dim
+        self.action_dim = action_dim
         self.gamma = gamma
         self.lr = lr
         self.batch_size = batch_size
         self.max_size = max_size
-        self.buffer = Buffer(state_dim=state_dim, action_dim=action_dim, max_size=max_size)
-        self.actor = Actor(input_dim=state_dim, output_dim=action_dim)
-        self.critic = Critic(input_dim=state_dim + action_dim)
+        self.buffer = Buffer(state_dim=self.state_dim, action_dim=self.action_dim, max_size=max_size)
+        self.actor = Actor(input_dim=self.state_dim, output_dim=self.action_dim)
+        self.critic = Critic(input_dim=self.state_dim + self.action_dim)
         self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=lr)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=lr)
 
-        self.target_actor = Actor(input_dim=state_dim, output_dim=action_dim)
-        self.target_critic = Critic(input_dim=state_dim + action_dim)
+        self.target_actor = Actor(input_dim=self.state_dim, output_dim=self.action_dim)
+        self.target_critic = Critic(input_dim=self.state_dim + self.action_dim)
         self.tau = 0.01
 
     def get_action(self, state):
@@ -103,7 +106,7 @@ class Agent:
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
     def train(self):
-        if len(self.buffer) < self.batch_size:
+        if self.buffer.size < self.batch_size:
             return
         state, action, reward, next_state, done = self.buffer.sample(self.batch_size)
         state = torch.tensor(state, dtype=torch.float32).view(self.batch_size, -1)
@@ -129,3 +132,19 @@ class Agent:
         self.actor_optim.step()
 
         self.update_target()
+
+    def save_model(self, path):
+        torch.save(self.actor.state_dict(), os.path.join(path, 'actor.pth'))
+        torch.save(self.critic.state_dict(), os.path.join(path, 'critic.pth'))
+
+    def load_model(self, path):
+        self.actor.load_state_dict(torch.load(os.path.join(path, 'actor.pth')))
+        self.critic.load_state_dict(torch.load(os.path.join(path, 'critic.pth')))
+
+    def save_buffer(self, path):
+        with open(path + 'ACBuffer.pkl', 'wb') as f:
+            pickle.dump(self.buffer, f)
+
+    def load_buffer(self, path):
+        with open(path + 'ACBuffer.pkl', 'rb') as f:
+            self.buffer = pickle.load(f)

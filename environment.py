@@ -1,8 +1,10 @@
+import os
 import gym
 from gym import spaces
 from gym.utils import seeding
 from gym.envs.classic_control.pendulum import PendulumEnv
 import numpy as np
+import pyglet
 
 
 class MyPendulumEnv(PendulumEnv):
@@ -29,6 +31,7 @@ class MyPendulumEnv(PendulumEnv):
     def reset(self):
         self.state = np.array([np.pi, 0.0])
         self.last_u = None
+        self.t = 0
         return self._get_obs()
 
     def reward(self, action):
@@ -36,6 +39,7 @@ class MyPendulumEnv(PendulumEnv):
         return -5 * theta ** 2 - 0.1 * omega ** 2 - action ** 2
 
     def step(self, u):
+        self.t += 1
         u = np.clip(u, -self.max_torque, self.max_torque)[0]
         self.last_u = u
         theta, omega = self.state
@@ -54,4 +58,21 @@ class MyPendulumEnv(PendulumEnv):
         # self.state = np.array([theta + omega * self.dt, omega + omega_dot * self.dt])
         return self._get_obs(), self.reward(u), False, {}
 
+    def render(self, mode='human'):
+        super().render(mode)
+        text = "Time: %.4f; Theta: %.3f" % (self.t * self.dt, self.state[0])
+        label = pyglet.text.Label(text, font_size=10, x=-240, y=240,
+                                  anchor_x='left', anchor_y='top',
+                                  color=(0, 0, 0, 255))
+        label.draw()
+        self.viewer.add_onetime(DrawText(label))
 
+        return self.viewer.render(return_rgb_array=mode == 'rgb_array')
+
+
+class DrawText:
+    def __init__(self, label):
+        self.label = label
+
+    def render(self):
+        self.label.draw()
